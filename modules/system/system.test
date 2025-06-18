@@ -1277,6 +1277,41 @@ class SiteMaintenanceTestCase extends DrupalWebTestCase {
     // Log in with temporary login link.
     $this->drupalPost($path, array(), t('Log in'));
     $this->assertText($user_message);
+    $this->drupalLogout();
+  }
+
+  /**
+   * Verify access to cron.php with custom 403 page during maintenance mode.
+   */
+  function testCronSiteMaintenance() {
+    global $base_url;
+
+    // Set custom 403 page.
+    $this->drupalLogin($this->admin_user);
+    $edit = array(
+      'title' => $this->randomName(10),
+      'body' => array(LANGUAGE_NONE => array(array('value' => $this->randomName(100)))),
+    );
+    $node = $this->drupalCreateNode($edit);
+
+    // Use a custom 403 page.
+    $this->drupalPost('admin/config/system/site-information', array('site_403' => 'node/' . $node->nid), t('Save configuration'));
+
+    // Turn on maintenance mode.
+    $edit = array(
+      'maintenance_mode' => 1,
+    );
+    $this->drupalPost('admin/config/development/maintenance', $edit, t('Save configuration'));
+    $this->drupalLogout();
+
+    // Access cron.php without valid cron key.
+    $this->drupalGet($base_url . '/cron.php', array('external' => TRUE));
+    $this->assertResponse(503);
+
+    // Access cron.php with valid cron key.
+    $key = variable_get('cron_key', 'drupal');
+    $this->drupalGet($base_url . '/cron.php', array('external' => TRUE, 'query' => array('cron_key' => $key)));
+    $this->assertResponse(503);
   }
 }
 
@@ -2871,6 +2906,20 @@ class SystemAdminTestCase extends DrupalWebTestCase {
   }
 
   /**
+   * Test the phpinfo() page.
+   */
+  function testAdminPhpInfo() {
+    $this->drupalGet('admin/reports/status/php');
+    $this->assertText('PHP');
+    $this->assertNoText('_COOKIE[');
+
+    variable_set('sa_core_2023_004_phpinfo_flags', INFO_ALL);
+    $this->drupalGet('admin/reports/status/php');
+    $this->assertText('PHP');
+    $this->assertText('_COOKIE[');
+  }
+
+  /**
    * Test compact mode.
    */
   function testCompactMode() {
@@ -2888,6 +2937,21 @@ class SystemAdminTestCase extends DrupalWebTestCase {
     $this->drupalGet('');
     $this->assertTrue($this->cookies['Drupal.visitor.admin_compact_mode']['value'], 'Compact mode persists on new requests.');
   }
+
+  /**
+   * Test Trusted Host Settings message on the status report page.
+   */
+  function testTrustedHostSettingsMessage() {
+    $this->drupalGet('admin/reports/status');
+    $this->assertText('The trusted_host_patterns setting is not configured in settings.php.');
+    $this->assertNoText('The trusted_host_patterns setting is set to allow');
+
+    variable_set('trusted_host_patterns', array('a_trusted_pattern', 'another_trusted_pattern'));
+    $this->drupalGet('admin/reports/status');
+    $this->assertNoText('The trusted_host_patterns setting is not configured in settings.php.');
+    $this->assertText('The trusted_host_patterns setting is set to allow a_trusted_pattern, another_trusted_pattern');
+  }
+
 }
 
 /**
